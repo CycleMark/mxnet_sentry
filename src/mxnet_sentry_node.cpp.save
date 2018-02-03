@@ -158,7 +158,7 @@ int main(int argc, char** argv){
 		}
 
    // Have we arrived back at the docking station. If so then proceed to dock
-   ROS_INFO("Way Point Number %i:", lWayPointNumber );
+   ROS_INFO("Way Point Number %i: ", lWayPointNumber );
    if(lWayPointNumber == 0 && (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED))
    {
       ROS_INFO("Returning To Charging Station...Docking In Progress");

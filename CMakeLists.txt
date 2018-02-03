@@ -10,6 +10,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   move_base_msgs
   actionlib
+  tf
 )
 
 
