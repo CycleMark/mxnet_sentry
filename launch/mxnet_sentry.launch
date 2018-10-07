@@ -1,0 +1,7 @@
+<!--
+  Standalone launcher for running a default Mxnet Kobuki
+ -->
+<launch>
+  <node pkg="mxnet_sentry" type="mxnet_sentry__node" name="mxnet_sentry_node" >
+  </node>
+</launch>

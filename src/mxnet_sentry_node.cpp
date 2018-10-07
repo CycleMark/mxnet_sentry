@@ -5,18 +5,17 @@
 #include <kobuki_msgs/SensorState.h>
 #include <mxnet_actionlib/AutoDockingAction.h>
 #include <tf/transform_listener.h>
+#include <actionlib/client/terminal_state.h>
+#include <sensor_msgs/LaserScan.h>
+
+using namespace mxnet_actionlib;
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 int lChargeStatus = -1;
 double lRobotChargeLevel = 0;
 double lMaxRobotChargeLevel = 164;
-
-void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr& msg)
- { 
-  //ROS_INFO("Charger Status: [%i]", msg->charger);
-  lChargeStatus = msg->charger;
-  lRobotChargeLevel  = msg->battery;
- }
+int lHomeWayPoint = 4;
+float lWaypointSleepWait = 5.0;
 
 const double PI = (double)3.14159265358979;
 
@@ -30,47 +29,101 @@ double Rad2Deg (double Radians)
 	return (Radians / PI) * 180;
 }
 
-int main(int argc, char** argv){
-  ros::init(argc, argv, "simple_navigation_goals"); 
 
-//tell the action client that we want to spin a thread by default
+void doneCb(const actionlib::SimpleClientGoalState& state,
+	const AutoDockingResultConstPtr& result)
+{
+	ROS_INFO("Docking Finished in state [%s]", state.toString().c_str());
+	ROS_INFO("Docking Answer: %s", result->text.c_str());
+//  ros::shutdown();
+}
 
-  ros::NodeHandle nodeHandle;
+// Called once when the goal becomes active
+void activeCb()
+{
+	ROS_INFO("Docking Goal just went active");
+}
+
+// Called every time feedback is received for the goal
+void feedbackCb(const AutoDockingFeedbackConstPtr& feedback)
+{
+	ROS_INFO("Docking Got Feedback state %s", feedback->state.c_str());
+	ROS_INFO("Docking Got Feedback text %s", feedback->text.c_str());
+
+}
+
+void scanCallback(const sensor_msgs::LaserScan::ConstPtr& scan )
+{
+	double lScanDistance = 0.0;
+	int lScanAngle = 0;
+
+	for ( int laserPointCtr = 0; lScanAngle <= scan->angle_max; laserPointCtr++)
+	{
+		lScanAngle += scan->angle_increment;
+
+		if ( std::isnan( scan->ranges[laserPointCtr]) )
+		{
+			continue;		
+		}
+
+		// Work out the average free space behind the robot
+		//if (lScanAngle < && lScanAngle <)
+		{
+			lScanDistance += scan->ranges[laserPointCtr];
+		}
+	}
+}
+
+// Called every time feedback is received for the goal
+void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr& msg)
+{ 
+  //ROS_INFO("Charger Status: [%i]", msg->charger);
+	lChargeStatus = msg->charger;
+	lRobotChargeLevel  = msg->battery;
+}
+
+int main(int argc, char** argv)
+{
+	ros::init(argc, argv, "simple_navigation_goals"); 
+
+	//tell the action client that we want to spin a thread by default
+
+	ros::NodeHandle nodeHandle;
 	
-  ros::Subscriber sub = nodeHandle.subscribe("/mobile_base/sensors/core", 10, kobukiSensorsCoreCallback);
+	ros::Subscriber sub = nodeHandle.subscribe("/mobile_base/sensors/core", 10, kobukiSensorsCoreCallback);
+	ros::Subscriber laserScanSub = nodeHandle.subscribe<sensor_msgs::LaserScan>("base_scan", 10, scanCallback);
 
-    //ros::spin();
-    ros::AsyncSpinner spinner(4);
-    spinner.start();
+	ros::AsyncSpinner spinner(4);
+	spinner.start();
 
-  MoveBaseClient ac("move_base", true);
-  actionlib::SimpleActionClient<mxnet_actionlib::AutoDockingAction> chargingStationClient("fibonacci", true);
+	MoveBaseClient ac("move_base", true);
+	actionlib::SimpleActionClient<mxnet_actionlib::AutoDockingAction> chargingStationClient("fibonacci", true);
 
-  tf::TransformListener listener;
+	tf::TransformListener listener;
 
   //wait for the action server to come up
-  while(!ac.waitForServer(ros::Duration(5.0))){
-    ROS_INFO("Waiting for the move_base action server to come up");
+	while(!ac.waitForServer(ros::Duration(5.0)))
+	{
+		ROS_INFO("Waiting for the move_base action server to come up");
+	}
 
-  }
-
-  move_base_msgs::MoveBaseGoal goal;
+	move_base_msgs::MoveBaseGoal goal;
 
 	goal.target_pose.header.frame_id = "map";
- 	goal.target_pose.header.stamp = ros::Time::now();
+	goal.target_pose.header.stamp = ros::Time::now();
 
 
-  move_base_msgs::MoveBaseGoal lWayPoints[10];
+	move_base_msgs::MoveBaseGoal lWayPoints[10];
 
 	// Find out starting position
 	bool lWaitingForTransform = true;
 	double xStartingPos = 0.0;
-  double yStartingPos = 0.0;
+	double yStartingPos = 0.0;
 	double startingRotation = 0.0;
 	double goal_angle = 0.0;
 	double RobotRadius = 0.16;
 	const double PI = (double)3.14159265358979;
-	double lDistanceToReverse = 0.35; //Measure in meters
+	double lDistanceToReverse = 0.60; //Measure in meters
 	double xTargetPos = 0.0;
 	double yTargetPos = 0.0;
 
@@ -82,27 +135,27 @@ int main(int argc, char** argv){
 	while (lWaitingForTransform == true)
 	{
 		try
-    {
-      listener.lookupTransform("/map", "/base_footprint", ros::Time(0), transform);
+		{
+			listener.lookupTransform("/map", "/base_footprint", ros::Time(0), transform);
 			xStartingPos = transform.getOrigin().x();
 			yStartingPos = transform.getOrigin().y();
 			startingRotation = tf::getYaw(transform.getRotation());	
 
 			ROS_INFO("****** STARTING LOCATION ******");
-      ROS_INFO("Starting PosX: %f", xStartingPos);
-      ROS_INFO("Starting PosY: %f", yStartingPos);
+			ROS_INFO("Starting PosX: %f", xStartingPos);
+			ROS_INFO("Starting PosY: %f", yStartingPos);
 			ROS_INFO("Starting Orientation: %f", startingRotation);
 			ROS_INFO("*******************************\n");
 
 			// Break out of this now we have starting position.
 			lWaitingForTransform = false;
-				
-    }
-    catch (tf::TransformException ex)
-    {
-      ROS_ERROR("%s",ex.what());
-      ros::Duration(1.0).sleep();
-    }
+
+		}
+		catch (tf::TransformException ex)
+		{
+			ROS_ERROR("%s",ex.what());
+			ros::Duration(1.0).sleep();
+		}
 	}
 
 	
@@ -117,10 +170,10 @@ int main(int argc, char** argv){
 	ROS_INFO("****** TARGET LOCATION ******");
 	ROS_INFO("Target PosX: %f", xTargetPos);
 	ROS_INFO("Target PosY: %f", yTargetPos);
-	ROS_INFO("Starting Orientation: %f", startingRotation);
+	ROS_INFO("Target Orientation: %f", startingRotation);
 	ROS_INFO("*******************************");
 
-	sleep(2);
+	sleep(lWaypointSleepWait);
 
 	// Now set the return to base location. We will make this 0.5m back from the starting
 	// starting locaton (idea being that it will give the robot a chance to doc sucessfully
@@ -129,179 +182,249 @@ int main(int argc, char** argv){
 	// Waypoint to store revers from base position
 	double xChargeBase = xTargetPos;
 	double yChargeBase = yTargetPos;
-  double chargeBaseAngle = startingRotation;
+	double chargeBaseAngle = startingRotation;
 
 	geometry_msgs::Quaternion  chargeBase_quant = tf::createQuaternionMsgFromYaw(chargeBaseAngle);
 
+	//////////////////////////////////////////////////
+	//
+	// Way Points for Patroling from Study route is:
+	//
+	// Study -> Kitchen Windows -> Oven -> Hall ->
+	// Loung (facing Window) -> Study & Charge
+	//
+	// Charge docking location is calculated as 30cm 
+	// back from charging station
+	//
+	//////////////////////////////////////////////////
+	lWayPoints[0].target_pose.pose.position.x = -2.384;
+	lWayPoints[0].target_pose.pose.position.y = 8.440;
 
-  lWayPoints[0].target_pose.pose.position.x = -0.336;
-  lWayPoints[0].target_pose.pose.position.y = 1.483;
+	goal_angle = 1.441;
+	goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
 
-  goal_angle = 1.565;
-  goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
+	lWayPoints[0].target_pose.pose.orientation = goal_quant;
 
-  lWayPoints[0].target_pose.pose.orientation = goal_quant;
+	lWayPoints[1].target_pose.pose.position.x = -0.401;
+	lWayPoints[1].target_pose.pose.position.y = 5.578;
 
+	goal_angle = -1.573;
+	goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
 
-  lWayPoints[1].target_pose.pose.position.x = 2.005;
-  lWayPoints[1].target_pose.pose.position.y = 0.105;
+	lWayPoints[1].target_pose.pose.orientation = goal_quant;
 
-	goal_angle = -1.733;
-  goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
+	lWayPoints[2].target_pose.pose.position.x = -2.641;
+	lWayPoints[2].target_pose.pose.position.y = -0.744;
 
-  lWayPoints[1].target_pose.pose.orientation = goal_quant;
+	goal_angle = -1.679;
+	goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
+	lWayPoints[2].target_pose.pose.orientation = goal_quant;
 
-  // Kitchen - Oven Area
-  lWayPoints[2].target_pose.pose.position.x = -0.469;
-  lWayPoints[2].target_pose.pose.position.y = -0.071;
+	lWayPoints[3].target_pose.pose.position.x = -4.510;
+	lWayPoints[3].target_pose.pose.position.y = -4.066;
 
-	//	goal_angle = -2.054;
-	 goal_angle = -1.533;
-  goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-  lWayPoints[2].target_pose.pose.orientation = goal_quant;
-
-  // Kitchen - Oven Area
-  lWayPoints[2].target_pose.pose.position.x = 0.270;
-  lWayPoints[2].target_pose.pose.position.y = -6.271;
-
-	//  goal_angle = -2.054;
-   goal_angle = -1.619;
-  goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-  lWayPoints[2].target_pose.pose.orientation = goal_quant;
+	goal_angle = -1.511;
+	goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
+	lWayPoints[3].target_pose.pose.orientation = goal_quant;
 
   // Return to base position (before executing docking request)
-  lWayPoints[3].target_pose.pose.position.x = xChargeBase;
-  lWayPoints[3].target_pose.pose.position.y = yChargeBase;
-  lWayPoints[3].target_pose.pose.orientation = chargeBase_quant;
+	lWayPoints[lHomeWayPoint].target_pose.pose.position.x = xChargeBase;
+	lWayPoints[lHomeWayPoint].target_pose.pose.position.y = yChargeBase;
+	lWayPoints[lHomeWayPoint].target_pose.pose.orientation = chargeBase_quant;
 
-  int lWayPointNumber = 0;
-  int lNoOfWayPoints  = 4;
+	int lWayPointNumber = 0;
+	int lNoOfWayPoints  = 5;
 
-  //Revers out of the chargins station to the return position
-    goal = lWayPoints[3];
+	//Reverse out of the chargins station to the return position
+	goal = lWayPoints[4];
 
-    ROS_INFO("Backing out of Charging Station");
+	ROS_INFO("Backing out of Charging Station");
 
-    //Each waypoint needs to be in the frame ID of the map
-    goal.target_pose.header.frame_id = "map";
-    goal.target_pose.header.stamp = ros::Time::now();
+  //Each waypoint needs to be in the frame ID of the map
+	goal.target_pose.header.frame_id = "map";
+	goal.target_pose.header.stamp = ros::Time::now();
 
-    ROS_INFO("Sending goal");
+	ROS_INFO("Sending goal");
 
-    ac.sendGoal(goal);
+	ac.sendGoal(goal);
 
-    ac.waitForResult();
+	ac.waitForResult();
 
-    if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
-   {
-      ROS_INFO("Undocked Sucessfully");
-		  ROS_INFO("WayPoint PosX: %f", lWayPoints[3].target_pose.pose.position.x);
-    	ROS_INFO("Waypoint PosY: %f", lWayPoints[3].target_pose.pose.position.y);
-    	ROS_INFO("Waypoint Orientation: %f", lWayPoints[3].target_pose.pose.orientation);
-    }
-    else
-    {
-      ROS_INFO("Failed to Undock");
-    }
+	if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+	{
+		ROS_INFO("Undocked Sucessfully");
+		ROS_INFO("WayPoint PosX: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.x);
+		ROS_INFO("Waypoint PosY: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.y);
+		ROS_INFO("Waypoint Orientation: %f", lWayPoints[lHomeWayPoint].target_pose.pose.orientation);
+	}
+	else
+	{
+		ROS_INFO("Failed to Undock");
+	}
 
-	sleep(2);
+	sleep(lWaypointSleepWait);
 
-  while(ros::ok())
+	while(ros::ok())
 	{
 		double lBatteryCapacity = (lRobotChargeLevel/lMaxRobotChargeLevel)*100.0;
 
-    try
-    {
-      	listener.lookupTransform("/map", "/base_footprint", ros::Time(0), transform);
-	    	ROS_INFO("PosX: %f", transform.getOrigin().x());
-    		ROS_INFO("PosY: %f", transform.getOrigin().y());
-    		ROS_INFO("Orientation: %f", tf::getYaw(transform.getRotation()));
+		try
+		{
+			listener.lookupTransform("/map", "/base_footprint", ros::Time(0), transform);
+			ROS_INFO("Robots Current Location: ");
+			ROS_INFO("PosX: %f", transform.getOrigin().x());
+			ROS_INFO("PosY: %f", transform.getOrigin().y());
+			ROS_INFO("Orientation: %f", tf::getYaw(transform.getRotation()));
 		}
-    catch (tf::TransformException ex)
-    {
-      ROS_ERROR("%s",ex.what());
-      ros::Duration(1.0).sleep();
-    }
+		catch (tf::TransformException ex)
+		{
+			ROS_ERROR("%s",ex.what());
+			ros::Duration(1.0).sleep();
+		}
 
-    // If we're in the charging station reverse out
-    if (lChargeStatus == 2)
-    {
-			
-			
-    }
+	    // If we're in the charging station reverse out
+		if (lChargeStatus == 2)
+		{
+
+		}
 
 		ROS_INFO("Battery Capacity: %f", lBatteryCapacity);
-		
-		//std::cout << "Battery Capacity: " << lBatteryCapacity << std::endl;
 
+    	//Itterate over the stored WayPoints 
+		goal = lWayPoints[lWayPointNumber];
 
-    //Itterate over the stored WayPoints 
-    goal = lWayPoints[lWayPointNumber];
+		ROS_INFO("Waypoint No. %i", lWayPointNumber);
 
-    ROS_INFO("Waypoint No. %i", lWayPointNumber);
+    	//Each waypoint needs to be in the frame ID of the map
+		goal.target_pose.header.frame_id = "map";
+		goal.target_pose.header.stamp = ros::Time::now();
 
-    //Each waypoint needs to be in the frame ID of the map
-    goal.target_pose.header.frame_id = "map";
-    goal.target_pose.header.stamp = ros::Time::now();
-
-    ROS_INFO("Sending goal");
+		ROS_INFO("Sending goal");
 
 		ROS_INFO("WayPoint PosX: %f",  lWayPoints[lWayPointNumber].target_pose.pose.position.x);
 		ROS_INFO("Waypoint PosY: %f",   lWayPoints[lWayPointNumber].target_pose.pose.position.y);
 		ROS_INFO("Waypoint Orientation: %f",   lWayPoints[lWayPointNumber].target_pose.pose.orientation);
 
-    ac.sendGoal(goal);
+		ac.sendGoal(goal);
 
-    ac.waitForResult();
+		ac.waitForResult();
 
-    if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+		if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 		{
-      ROS_INFO("Waypoint Reached Sucessfully");
+			ROS_INFO("Waypoint Reached Sucessfully");
 		}
-    else
+		else
 		{
-      ROS_INFO("Failed to Reach Waypoint");
-		}
-
-	// For now just pause 5 seconds at each waypoint
-		if (1 )
-    {
-      sleep(5.0);
-      ROS_INFO("Pausing at WayPoint...");
-    }
-
-    if ( lWayPointNumber < (lNoOfWayPoints-1) )
-		{
-    	lWayPointNumber++;
-		}
-    else
-		{
-      lWayPointNumber = 0;
+			ROS_INFO("Failed to Reach Waypoint");
 		}
 
-   // Have we arrived back at the docking station. If so then proceed to dock
-   ROS_INFO("Way Point Number %i:", lWayPointNumber );
-   if(lWayPointNumber == 0 && (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED))
-   {
-      ROS_INFO("Returning To Charging Station...Docking In Progress");
+		// For now just pause 5 seconds at each waypoint
+		if (1)
+		{
+			sleep(lWaypointSleepWait);
+			ROS_INFO("Pausing at WayPoint...");
+		}
 
-      mxnet_actionlib::AutoDockingGoal chargingStationGoal;
-      chargingStationClient.sendGoal(chargingStationGoal);
-      bool finished_before_timeout = chargingStationClient.waitForResult(ros::Duration(480.0));
+		if ( lWayPointNumber < (lNoOfWayPoints-1) )
+		{
+			lWayPointNumber++;
+		}
+		else
+		{
+			lWayPointNumber = 0;
+		}
 
-      if (finished_before_timeout)
-      {
-         actionlib::SimpleClientGoalState state = chargingStationClient.getState();
-         ROS_INFO("Docking finished: %s",state.toString().c_str());
-      }
-      else
-      {
-        ROS_INFO("Action did not finish before the time out.");
-      }
+		bool lRobotDockedAndCharging = false;
 
-      sleep(3600); //sleep to charge up (TODO - sense charge status
-    }
-  
-  }
-  return 0;
+	   // Have we arrived back at the docking station. If so then proceed to dock
+		ROS_INFO("Executing WayPoint Number %i:", lWayPointNumber );
+
+		if(lWayPointNumber == 0 && (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED))
+		{
+			while (lRobotDockedAndCharging == false)
+			{
+				ROS_INFO("Returning To Charging Station...Docking In Progress");
+
+				mxnet_actionlib::AutoDockingGoal chargingStationGoal;
+				//  	    chargingStationClient.sendGoal(chargingStationGoal);
+				chargingStationClient.sendGoal(chargingStationGoal, &doneCb, &activeCb, &feedbackCb);
+
+				bool finished_before_timeout = chargingStationClient.waitForResult(ros::Duration(240.0));
+
+				actionlib::SimpleClientGoalState dockingState = chargingStationClient.getState();
+				ROS_INFO("State: %s", dockingState.toString().c_str());
+
+				if (finished_before_timeout == false || 
+					dockingState != actionlib::SimpleClientGoalState::SUCCEEDED)
+				{
+  	       			//actionlib::SimpleClientGoalState state = chargingStationClient.getState();
+					//if (state == RobotDockingState::LOST)
+					if (dockingState != actionlib::SimpleClientGoalState::SUCCEEDED)
+					{
+						ROS_INFO("Docking Lost - Attempting Redocking");
+					}
+
+					// The robot hasn't docked. Therefore call the planner to 
+					// move back and try again.
+					if (lChargeStatus != 2)
+					{
+						bool lAtUndockLocation = false;
+
+						while (lAtUndockLocation == false)
+						{
+							//Reverse out of the charging station to the return position
+							goal = lWayPoints[lHomeWayPoint];
+							ROS_INFO("Attempting re-Docking Procedure");
+
+							//Each waypoint needs to be in the frame ID of the map
+							goal.target_pose.header.frame_id = "map";
+							goal.target_pose.header.stamp = ros::Time::now();
+
+							ROS_INFO("Sending goal");
+							ac.sendGoal(goal);
+							ac.waitForResult();
+
+							if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+							{
+								ROS_INFO("******************************");
+								ROS_INFO("Successfully Returned to Undock Location...");
+								ROS_INFO("WayPoint PosX: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.x);
+								ROS_INFO("Waypoint PosY: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.y);
+								ROS_INFO("Waypoint Orientation: %f", lWayPoints[lHomeWayPoint].target_pose.pose.orientation);
+								ROS_INFO("Stabalisation Pause...");
+								ROS_INFO("******************************");
+
+								sleep(lWaypointSleepWait);
+								lAtUndockLocation = true; // Make sure we're back at the undocking location.
+							}
+							else
+							{
+								ROS_INFO("Failed to get to undock location for reattempt - will try again");
+								lAtUndockLocation = false;
+							}
+						}
+			    	} //  if (lChargeStatus != 2)
+			    	else
+			    	{
+						// In this case we didn't dock within the timeout - however the robot appears to be
+						// charging so don't try re-docking procedure
+				    	ROS_INFO("Docking finished & Charging: %s", dockingState.toString().c_str());
+						lRobotDockedAndCharging = true;
+			    	}
+
+	    	  	} // (finished_before_timeout == true)
+	    	  	else
+	    	  	{
+	    	  		ROS_INFO("Docking Completed Sucessfully.");
+	    	  		lRobotDockedAndCharging = true; 
+	    	  	}
+			} // while (lRobotDockedAndCharging == false)
+
+	      	//sleep(3600); //sleep to charge up (TODO - sense charge status
+	      	ROS_INFO("Shutting down Mxnet Sentry Node.");
+			ros::shutdown();
+		}
+	}
+
+	return 0;
 }
