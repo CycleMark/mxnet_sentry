@@ -2,11 +2,12 @@
 #include <iostream>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
-#include <kobuki_msgs/SensorState.h>
+#include <../../../devel_isolated/kobuki_msgs/include/kobuki_msgs/SensorState.h>
 #include <mxnet_actionlib/AutoDockingAction.h>
 #include <tf/transform_listener.h>
 #include <actionlib/client/terminal_state.h>
 #include <sensor_msgs/LaserScan.h>
+#include <std_srvs/Empty.h>
 
 using namespace mxnet_actionlib;
 
@@ -141,11 +142,13 @@ int main(int argc, char** argv)
 			yStartingPos = transform.getOrigin().y();
 			startingRotation = tf::getYaw(transform.getRotation());	
 
-			ROS_INFO("****** STARTING LOCATION ******");
+/*			ROS_INFO("****** STARTING LOCATION ******");
 			ROS_INFO("Starting PosX: %f", xStartingPos);
 			ROS_INFO("Starting PosY: %f", yStartingPos);
 			ROS_INFO("Starting Orientation: %f", startingRotation);
-			ROS_INFO("*******************************\n");
+			ROS_INFO("*******************************\n");*/
+
+			ROS_INFO("****** STARTING LOCATION ******\r\n Starting PosX: %f\r\n Starting PosY: %f\r\n Starting Orientation: %f\r\n *******************************\r\n", xStartingPos, yStartingPos, startingRotation);
 
 			// Break out of this now we have starting position.
 			lWaitingForTransform = false;
@@ -167,12 +170,14 @@ int main(int argc, char** argv)
 	yTargetPos = yStartingPos + lVerticalComponent;
 
 
-	ROS_INFO("****** TARGET LOCATION ******");
+/*	ROS_INFO("****** TARGET LOCATION ******");
 	ROS_INFO("Target PosX: %f", xTargetPos);
 	ROS_INFO("Target PosY: %f", yTargetPos);
 	ROS_INFO("Target Orientation: %f", startingRotation);
 	ROS_INFO("*******************************");
+*/
 
+	ROS_INFO("****** TARGET LOCATION ******\r\n Target PosX: %f\r\n Target PosY: %f\r\n Target Orientation: %f\r\n *******************************\r\n", xTargetPos, yTargetPos, startingRotation);
 	sleep(lWaypointSleepWait);
 
 	// Now set the return to base location. We will make this 0.5m back from the starting
@@ -197,15 +202,15 @@ int main(int argc, char** argv)
 	// back from charging station
 	//
 	//////////////////////////////////////////////////
-	lWayPoints[0].target_pose.pose.position.x = -2.384;
-	lWayPoints[0].target_pose.pose.position.y = 8.440;
+	lWayPoints[0].target_pose.pose.position.x = -2.63;//-2.384;
+	lWayPoints[0].target_pose.pose.position.y = 9.24;//8.440;
 
 	goal_angle = 1.441;
 	goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
 
 	lWayPoints[0].target_pose.pose.orientation = goal_quant;
 
-	lWayPoints[1].target_pose.pose.position.x = -0.401;
+	lWayPoints[1].target_pose.pose.position.x = -0.751;
 	lWayPoints[1].target_pose.pose.position.y = 5.578;
 
 	goal_angle = -1.573;
@@ -264,6 +269,8 @@ int main(int argc, char** argv)
 
 	sleep(lWaypointSleepWait);
 
+	bool lBatteryTooLow = false;
+
 	while(ros::ok())
 	{
 		double lBatteryCapacity = (lRobotChargeLevel/lMaxRobotChargeLevel)*100.0;
@@ -290,12 +297,12 @@ int main(int argc, char** argv)
 
 		ROS_INFO("Battery Capacity: %f", lBatteryCapacity);
 
-    	//Itterate over the stored WayPoints 
+	   	// Itterate over the stored WayPoints 
 		goal = lWayPoints[lWayPointNumber];
 
 		ROS_INFO("Waypoint No. %i", lWayPointNumber);
 
-    	//Each waypoint needs to be in the frame ID of the map
+    	// Each waypoint needs to be in the frame ID of the map
 		goal.target_pose.header.frame_id = "map";
 		goal.target_pose.header.stamp = ros::Time::now();
 
@@ -325,12 +332,42 @@ int main(int argc, char** argv)
 			ROS_INFO("Pausing at WayPoint...");
 		}
 
-		if ( lWayPointNumber < (lNoOfWayPoints-1) )
+
+		if (lBatteryCapacity < 80.0)
+		{
+			ROS_WARN("Battery Too Low - Returning To Base");
+			lBatteryTooLow = true;
+			lWayPointNumber = lHomeWayPoint;
+
+			// Each waypoint needs to be in the frame ID of the map
+			goal.target_pose.header.frame_id = "map";
+			goal.target_pose.header.stamp = ros::Time::now();
+
+			ROS_INFO("Sending goal");
+
+			ROS_INFO("WayPoint PosX: %f",  lWayPoints[lWayPointNumber].target_pose.pose.position.x);
+			ROS_INFO("Waypoint PosY: %f",   lWayPoints[lWayPointNumber].target_pose.pose.position.y);
+			ROS_INFO("Waypoint Orientation: %f",   lWayPoints[lWayPointNumber].target_pose.pose.orientation);
+
+			ac.sendGoal(goal);
+
+			ac.waitForResult();
+
+			if(ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+			{
+				ROS_INFO("Charge - Waypoint Reached Sucessfully");
+			}
+			else
+			{
+				ROS_INFO("Charge - Failed to Reach Waypoint");
+			}
+		}
+		else if ( lWayPointNumber < (lNoOfWayPoints-1) )
 		{
 			lWayPointNumber++;
 		}
 		else
-		{
+		{ 
 			lWayPointNumber = 0;
 		}
 
@@ -339,7 +376,11 @@ int main(int argc, char** argv)
 	   // Have we arrived back at the docking station. If so then proceed to dock
 		ROS_INFO("Executing WayPoint Number %i:", lWayPointNumber );
 
-		if(lWayPointNumber == 0 && (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED))
+		int lRedockingCtr = 0;
+
+		// If we have completed a route or the battery to too low return to base and dock
+		if( (lWayPointNumber == 0 && (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED))
+			|| lBatteryTooLow == true)
 		{
 			while (lRobotDockedAndCharging == false)
 			{
@@ -375,6 +416,7 @@ int main(int argc, char** argv)
 							//Reverse out of the charging station to the return position
 							goal = lWayPoints[lHomeWayPoint];
 							ROS_INFO("Attempting re-Docking Procedure");
+							lRedockingCtr++;
 
 							//Each waypoint needs to be in the frame ID of the map
 							goal.target_pose.header.frame_id = "map";
@@ -419,9 +461,17 @@ int main(int argc, char** argv)
 	    	  		lRobotDockedAndCharging = true; 
 	    	  	}
 			} // while (lRobotDockedAndCharging == false)
+ 
+	     //sleep(3600); //sleep to charge up (TODO - sense charge status
+	   	ROS_INFO("Redocking Attempts: %i", lRedockingCtr);
+	   	ROS_INFO("Stopping LIDAR Motor");
 
-	      	//sleep(3600); //sleep to charge up (TODO - sense charge status
-	      	ROS_INFO("Shutting down Mxnet Sentry Node.");
+			ros::ServiceClient stopMotorServiceClient = nodeHandle.serviceClient<std_srvs::Empty>("/stop_motor");
+  		std_srvs::Empty srv;
+  		stopMotorServiceClient.call(srv);
+
+			ROS_INFO("Shutting down Mxnet Sentry Node.");
+
 			ros::shutdown();
 		}
 	}
