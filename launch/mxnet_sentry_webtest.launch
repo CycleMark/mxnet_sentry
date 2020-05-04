@@ -2,20 +2,16 @@
   Standalone launcher for running a default Mxnet Kobuki
  -->
 <launch>
-
-  <!--node pkg="mxnet_sentry" type="mxnet_sentry_node" name="mxnet_sentry_node" >
-  </node-->
-
-  <!--node name="rplidarNode"          pkg="rplidar_ros"  type="rplidarNode" output="screen">
+  <node name="rplidarNode"          pkg="rplidar_ros"  type="rplidarNode" output="screen">
     <param name="serial_port"         type="string" value="/dev/rplidar"/>
     <param name="serial_baudrate"     type="int"    value="256000"/><!--A3 -->
     <param name="frame_id"            type="string" value="laser"/>
     <param name="inverted"            type="bool"   value="false"/>
     <param name="angle_compensate"    type="bool"   value="true"/>
     <param name="scan_mode"           type="string" value="Sensitivity"/>
-  </node-->
+  </node>
+	<include file="$(find rosbridge_server)/launch/rosbridge_websocket.launch"/>
 
-	<!--include file="$(find cloudwatch_logger)/launch/mxnet_cloudwatch_logger_application.launch"/-->
-  <!--node name="robot_pose_publisher" pkg="robot_pose_publisher" type="robot_pose_publisher" output="screen"/-->
+  <node name="robot_pose_publisher" pkg="robot_pose_publisher" type="robot_pose_publisher" output="screen"/>
 
 </launch>
