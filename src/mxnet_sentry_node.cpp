@@ -120,6 +120,8 @@ void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr &msg)
 	lRobotChargeLevel = msg->battery;
 }
 
+//Test Change
+
 // Load Waypoints from JSON file
 bool loadWayPoints()
 {
