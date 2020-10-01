@@ -1,3 +1,5 @@
+// Mxnet Robotics - 2020
+
 #include <ros/ros.h>
 #include <iostream>
 #include <move_base_msgs/MoveBaseAction.h>
@@ -119,8 +121,6 @@ void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr &msg)
 	lChargeStatus = msg->charger;
 	lRobotChargeLevel = msg->battery;
 }
-
-//Test Change
 
 // Load Waypoints from JSON file
 bool loadWayPoints()
