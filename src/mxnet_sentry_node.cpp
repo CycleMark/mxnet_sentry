@@ -9,16 +9,24 @@
 #include <sensor_msgs/LaserScan.h>
 #include <std_srvs/Empty.h>
 #include <std_msgs/String.h>
+#include <regex>
+#include <nlohmann/json.hpp>
+#include <fstream>
+
 
 using namespace mxnet_actionlib;
+using json = nlohmann::json;
 
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 int lChargeStatus = -1;
 double lRobotChargeLevel = 0;
 double lMaxRobotChargeLevel = 164;
-int lHomeWayPoint = 4;
+int lHomeWayPoint = 0;
 float lWaypointSleepWait = 5.0;
 std::string cmdString = "STOP";
+nlohmann::json robot_navigation_json;
+nlohmann::json robot_config_json;
+move_base_msgs::MoveBaseGoal HomeStationGoal;
 
 const double PI = (double)3.14159265358979;
 
@@ -38,6 +46,28 @@ void commandCallback(const std_msgs::String::ConstPtr &cmdMsg)
 	ROS_INFO("Command Recieved...: [%s]", cmdMsg->data.c_str());
 	cmdString = cmdMsg->data.c_str();
 }
+
+// Callback Methods for Goal Planning
+
+void goalCompletePlanCallBack(const actionlib::SimpleClientGoalState &state, 
+						  const move_base_msgs::MoveBaseActionResultConstPtr &result)
+{
+	//move_base_msgs::MoveBaseGoal goal;
+	ROS_INFO("Goal Plan Complete");
+}
+
+void goalActiveCallBack()
+{
+	ROS_INFO("Planning Goal Active");
+}
+
+void goalFeedbackCallback(const move_base_msgs::MoveBaseFeedbackConstPtr &feedback)
+{
+
+}
+
+
+// Callback Methods for Auto Docking Planning
 
 void doneCb(const actionlib::SimpleClientGoalState &state,
 			const AutoDockingResultConstPtr &result)
@@ -90,6 +120,98 @@ void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr &msg)
 	lRobotChargeLevel = msg->battery;
 }
 
+// Load Waypoints from JSON file
+bool loadWayPoints()
+{
+	ROS_INFO("Loading Robot Navigation Waypoints");
+
+	std::ifstream jsonWayPointFile("/home/mark/mxnetRobotics/kobukirobot/waypoints/robot_waypoints.json");
+
+	try
+	{
+		json jsonWayPointData;
+       	robot_navigation_json = nlohmann::json::parse(jsonWayPointFile);
+
+		ROS_INFO("Waypoints Parsed.");
+
+        std::cout << robot_navigation_json << std::endl;
+	}
+     catch (json::exception& e)
+     {
+         // output exception information
+         std::cout << "message: " << e.what() << '\n'
+                   << "exception id: " << e.id << std::endl;
+	 }
+
+	// Get the number of Waypoints in the file
+	std::cout << "WayPoints Loaded: " << robot_navigation_json["waypoints"]["waypoint"].size() << std::endl;
+}
+
+// Load Waypoints from JSON file
+bool loadRobotConfiguration()
+{
+	ROS_INFO("Loading Robot Configuration");
+
+	std::ifstream jsonWayPointFile("/home/mark/mxnetRobotics/kobukirobot/config/robot_config.json");
+	
+	try
+	{
+		json jsonConfigData;
+       	robot_config_json = nlohmann::json::parse(jsonWayPointFile);
+
+		ROS_INFO("Configuration Parsed.");
+        std::cout << robot_config_json << std::endl;
+	}
+     catch (json::exception& e)
+     {
+         // output exception information
+         std::cout << "message: " << e.what() << '\n'
+                   << "exception id: " << e.id << std::endl;
+	 }
+}
+
+
+bool buildNextGoal(move_base_msgs::MoveBaseGoal& goal, int WaypointID, nlohmann::json robotdata_json)
+{
+	ROS_INFO("buildNextGoal");
+
+	// If we can come to the end of the Waypoint list - retrun the home goal	
+	if (robot_navigation_json["waypoints"]["waypoint"].size() == WaypointID)
+	{
+		ROS_INFO("Waypoints Completed - Returning Home Goal");
+		goal =  HomeStationGoal;
+
+		// Each waypoint needs to be in the frame ID of the map
+		goal.target_pose.header.frame_id = "map";
+		goal.target_pose.header.stamp = ros::Time::now();
+
+		return true;
+	}
+	
+	goal.target_pose.pose.position.x = robotdata_json["waypoints"]["waypoint"][WaypointID]["xposition"];
+	goal.target_pose.pose.position.y = robotdata_json["waypoints"]["waypoint"][WaypointID]["yposition"];
+
+	double goal_angle = robotdata_json["waypoints"]["waypoint"][WaypointID]["angle"];
+	geometry_msgs::Quaternion goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
+	goal.target_pose.pose.orientation = goal_quant;
+
+	// Each waypoint needs to be in the frame ID of the map
+	goal.target_pose.header.frame_id = "map";
+	goal.target_pose.header.stamp = ros::Time::now();
+
+
+	ROS_INFO("Waypoint No. %i", WaypointID);
+	std::cout << "Waypoint Name. %s" << robotdata_json["waypoints"]["waypoint"][WaypointID]["description"] << std::endl;
+	
+	ROS_INFO("Sending goal");
+
+	ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x );
+	ROS_INFO("Waypoint PosY: %f", goal.target_pose.pose.position.y);
+	ROS_INFO("Waypoint Orientation: %f", goal.target_pose.pose.orientation);
+
+	return true;
+}
+
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "simple_navigation_goals");
@@ -119,14 +241,12 @@ int main(int argc, char **argv)
 	{
 		ROS_INFO("Waiting for the move_base action server to come up");
 	}
-
+ 
 	move_base_msgs::MoveBaseGoal goal;
 
 	goal.target_pose.header.frame_id = "map";
 	goal.target_pose.header.stamp = ros::Time::now();
-
-	move_base_msgs::MoveBaseGoal lWayPoints[10];
-
+	
 	// Find out starting position
 	bool lWaitingForTransform = true;
 	double xStartingPos = 0.0;
@@ -138,12 +258,13 @@ int main(int argc, char **argv)
 	double lDistanceToReverse = 0.60; //Measure in meters
 	double xTargetPos = 0.0;
 	double yTargetPos = 0.0;
-
+	
 	tf::StampedTransform transform;
 	geometry_msgs::Quaternion goal_quant;
 
 	// Keep looping. Initially checking if the command has been sent to start a patrol sequence
-
+	ROS_INFO("Robot Online...");
+	
 	while (ros::ok())
 	{
 		// Wait until the command string to start it given
@@ -169,6 +290,15 @@ int main(int argc, char **argv)
 		}
 		else
 		{
+			// Command has been sent to start moving - so load waypoints and config file
+			// (ensures dynamic update of waypoints)
+			
+			loadWayPoints();
+			loadRobotConfiguration();
+
+			double lBatteryLowLevel = robot_config_json["config"]["batteryLowLevel"];
+			ROS_INFO("Battery Low Level Set @ %f", lBatteryLowLevel);
+
 			// Once the command is sent to start moving - get the starting location, save it as the HOME
 			// location, back out of the docking station and run WayPoint sqeuence.
 			startMotorServiceClient.call(srv);			
@@ -229,6 +359,10 @@ int main(int argc, char **argv)
 
 			geometry_msgs::Quaternion chargeBase_quant = tf::createQuaternionMsgFromYaw(chargeBaseAngle);
 
+			HomeStationGoal.target_pose.pose.position.x = xChargeBase;
+			HomeStationGoal.target_pose.pose.position.y = yChargeBase;
+			HomeStationGoal.target_pose.pose.orientation = chargeBase_quant;
+
 			//////////////////////////////////////////////////
 			//
 			// Way Points for Patroling from Study route is:
@@ -240,46 +374,18 @@ int main(int argc, char **argv)
 			// back from charging station
 			//
 			//////////////////////////////////////////////////
-			lWayPoints[0].target_pose.pose.position.x = -2.63; //-2.384;
-			lWayPoints[0].target_pose.pose.position.y = 9.24;  //8.440;
+			int lCtr = robot_navigation_json["waypoints"]["waypoint"].size() ;
 
-			goal_angle = 1.441;
-			goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-
-			lWayPoints[0].target_pose.pose.orientation = goal_quant;
-
-			lWayPoints[1].target_pose.pose.position.x = -0.751;
-			lWayPoints[1].target_pose.pose.position.y = 5.578;
-
-			goal_angle = -1.573;
-			goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-
-			lWayPoints[1].target_pose.pose.orientation = goal_quant;
-
-			lWayPoints[2].target_pose.pose.position.x = -2.641;
-			lWayPoints[2].target_pose.pose.position.y = -0.744;
-
-			goal_angle = -1.679;
-			goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-			lWayPoints[2].target_pose.pose.orientation = goal_quant;
-
-			lWayPoints[3].target_pose.pose.position.x = -4.510;
-			lWayPoints[3].target_pose.pose.position.y = -4.066;
-
-			goal_angle = -1.511;
-			goal_quant = tf::createQuaternionMsgFromYaw(goal_angle);
-			lWayPoints[3].target_pose.pose.orientation = goal_quant;
+			lHomeWayPoint = robot_navigation_json["waypoints"]["waypoint"].size();
+			ROS_INFO("Waypoints Loaded: %i", lHomeWayPoint);
 
 			// Return to base position (before executing docking request)
-			lWayPoints[lHomeWayPoint].target_pose.pose.position.x = xChargeBase;
-			lWayPoints[lHomeWayPoint].target_pose.pose.position.y = yChargeBase;
-			lWayPoints[lHomeWayPoint].target_pose.pose.orientation = chargeBase_quant;
 
 			int lWayPointNumber = 0;
-			int lNoOfWayPoints = 5;
+			int lNoOfWayPoints = lCtr +1;
 
-			//Reverse out of the chargins station to the return position
-			goal = lWayPoints[4];
+			//Reverse out of the charging station to the return position
+			goal = HomeStationGoal;
 
 			ROS_INFO("Backing out of Charging Station");
 
@@ -291,14 +397,17 @@ int main(int argc, char **argv)
 
 			ac.sendGoal(goal);
 
+			//ac.sendGoal(goal, &goalCompletePlanCallBack, &goalActiveCallBack, &goalFeedbackCallback);
+			ac.getState();
+
 			ac.waitForResult();
 
 			if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 			{
 				ROS_INFO("Undocked Sucessfully");
-				ROS_INFO("WayPoint PosX: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.x);
-				ROS_INFO("Waypoint PosY: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.y);
-				ROS_INFO("Waypoint Orientation: %f", lWayPoints[lHomeWayPoint].target_pose.pose.orientation);
+				ROS_INFO("WayPoint PosX: %f", HomeStationGoal.target_pose.pose.position.x);
+				ROS_INFO("Waypoint PosY: %f", HomeStationGoal.target_pose.pose.position.y);
+				ROS_INFO("Waypoint Orientation: %f", HomeStationGoal.target_pose.pose.orientation);
 			}
 			else
 			{
@@ -330,48 +439,74 @@ int main(int argc, char **argv)
 				// If we're in the charging station reverse out
 				if (lChargeStatus == 2)
 				{
+
 				}
 
 				ROS_INFO("Battery Capacity: %f", lBatteryCapacity);
 
 				// Itterate over the stored WayPoints
-				goal = lWayPoints[lWayPointNumber];
 
-				ROS_INFO("Waypoint No. %i", lWayPointNumber);
-
-				// Each waypoint needs to be in the frame ID of the map
-				goal.target_pose.header.frame_id = "map";
-				goal.target_pose.header.stamp = ros::Time::now();
-
-				ROS_INFO("Sending goal");
-
-				ROS_INFO("WayPoint PosX: %f", lWayPoints[lWayPointNumber].target_pose.pose.position.x);
-				ROS_INFO("Waypoint PosY: %f", lWayPoints[lWayPointNumber].target_pose.pose.position.y);
-				ROS_INFO("Waypoint Orientation: %f", lWayPoints[lWayPointNumber].target_pose.pose.orientation);
-
+				buildNextGoal(goal, lWayPointNumber, robot_navigation_json);
 				ac.sendGoal(goal);
 
-				ac.waitForResult();
+				actionlib::SimpleClientGoalState navigationState = ac.getState();
+				ROS_INFO("Navigation State: %s", navigationState.toString().c_str());
 
+				// Monitor the state of the Navigation. If there is a change in plan/command
+				// i.e. cmdString changes then this will enable the robot to react immediately 
+				// rather than wait for the goal to complete.
+				while (navigationState == actionlib::SimpleClientGoalState::ACTIVE ||
+					   navigationState == actionlib::SimpleClientGoalState::PENDING)
+				{
+					navigationState = ac.getState();
+					ROS_DEBUG("Navigation State: %s", navigationState.toString().c_str());
+					
+					std::regex rgx("Waypoint:[^0-9]*([0-9]+).*");
+					std::smatch match;
+					const std::string s = cmdString;
+
+					if (std::regex_search(s.begin(), s.end(), match, rgx))
+					{
+						cmdString = ""; // Clear the command string (Else we will keep looping)
+						
+						lWayPointNumber = std::stoi(match[1]);
+						ROS_DEBUG("Waypoint Redirect Received. New Waypoint %i", lWayPointNumber);
+
+						ac.cancelGoal();
+
+						buildNextGoal(goal, lWayPointNumber, robot_navigation_json);
+
+						ac.sendGoal(goal);
+
+					}
+
+					sleep(1); // Putting sleep here serves two purposes 1) We're not running round this loop the while time 
+							  // 2) If there is a WayPoint Change/Redirect then it will give time for the ActionClient to 
+							  // send the goal to the server before the loop loops again
+
+					if (cmdString == "HOME")
+					{
+						ac.cancelGoal();
+					}
+				}
+
+				//ac.waitForResult();
+				// For now just pause 5 seconds at each waypoint
 				if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 				{
 					ROS_INFO("Waypoint Reached Sucessfully");
+					
+					sleep(lWaypointSleepWait);
+					ROS_INFO("Pausing at WayPoint...");
 				}
 				else
 				{
 					ROS_INFO("Failed to Reach Waypoint");
 				}
 
-				// For now just pause 5 seconds at each waypoint
-				if (1)
+				if (lBatteryCapacity < lBatteryLowLevel || cmdString == "HOME")
 				{
-					sleep(lWaypointSleepWait);
-					ROS_INFO("Pausing at WayPoint...");
-				}
-
-				if (lBatteryCapacity < 80.0 || cmdString == "HOME")
-				{
-					if (lBatteryCapacity < 80.0)
+					if (lBatteryCapacity < lBatteryLowLevel)
 					{
 						ROS_WARN("Battery Too Low - Returning To Base");						
 					}
@@ -383,17 +518,16 @@ int main(int argc, char **argv)
 					lBatteryTooLow = true;
 
 					// Each waypoint needs to be in the frame ID of the map
-					goal = lWayPoints[lHomeWayPoint];
+					goal = HomeStationGoal;
 					goal.target_pose.header.frame_id = "map";
-					goal.target_pose.header.stamp = ros::Time::now();
-					
+					goal.target_pose.header.stamp = ros::Time::now();					
 
 					ROS_INFO("Sending goal");
 
 					// Issue Waypoint command to go home/return to base
-					ROS_INFO("WayPoint PosX: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.x);
-					ROS_INFO("Waypoint PosY: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.y);
-					ROS_INFO("Waypoint Orientation: %f", lWayPoints[lHomeWayPoint].target_pose.pose.orientation);
+					ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x );
+					ROS_INFO("Waypoint PosY: %f", goal.target_pose.pose.position.y);
+					ROS_INFO("Waypoint Orientation: %f", goal.target_pose.pose.orientation);
 
 					ac.sendGoal(goal);
 
@@ -460,7 +594,7 @@ int main(int argc, char **argv)
 								while (lAtUndockLocation == false)
 								{
 									//Reverse out of the charging station to the return position
-									goal = lWayPoints[lHomeWayPoint];
+									goal = HomeStationGoal;
 									ROS_INFO("Attempting re-Docking Procedure");
 									lRedockingCtr++;
 
@@ -476,9 +610,9 @@ int main(int argc, char **argv)
 									{
 										ROS_INFO("******************************");
 										ROS_INFO("Successfully Returned to Undock Location...");
-										ROS_INFO("WayPoint PosX: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.x);
-										ROS_INFO("Waypoint PosY: %f", lWayPoints[lHomeWayPoint].target_pose.pose.position.y);
-										ROS_INFO("Waypoint Orientation: %f", lWayPoints[lHomeWayPoint].target_pose.pose.orientation);
+										ROS_INFO("WayPoint PosX: %f", HomeStationGoal.target_pose.pose.position.x);
+										ROS_INFO("Waypoint PosY: %f", HomeStationGoal.target_pose.pose.position.y);
+										ROS_INFO("Waypoint Orientation: %f", HomeStationGoal.target_pose.pose.orientation);
 										ROS_INFO("Stabalisation Pause...");
 										ROS_INFO("******************************");
 
@@ -523,5 +657,8 @@ int main(int argc, char **argv)
 			}
 		}
 	}
+
+	ROS_INFO("Robot Going Offline");
+	sleep(1);
 	return 0;
 }

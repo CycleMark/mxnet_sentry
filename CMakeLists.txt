@@ -17,6 +17,7 @@ find_package(catkin REQUIRED COMPONENTS
 	mxnet_actionlib
 )
 
+#find_package(nlohmann_json REQUIRED)
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
@@ -123,6 +124,7 @@ catkin_package(
 # include_directories(include)
 include_directories(
   ${catkin_INCLUDE_DIRS}
+  /home/mark/json/include/
 )
 
 ## Declare a C++ library
