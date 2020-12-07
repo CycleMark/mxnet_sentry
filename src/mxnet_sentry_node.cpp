@@ -299,7 +299,9 @@ int main(int argc, char **argv)
 			loadRobotConfiguration();
 
 			double lBatteryLowLevel = robot_config_json["config"]["batteryLowLevel"];
+			double lMaxRobotChargeLevel = robot_config_json["config"]["maxRobotChargeLevel"];
 			ROS_INFO("Battery Low Level Set @ %f", lBatteryLowLevel);
+			ROS_INFO("Battery Max Charge Level Set @ %f", lMaxRobotChargeLevel);
 
 			// Once the command is sent to start moving - get the starting location, save it as the HOME
 			// location, back out of the docking station and run WayPoint sqeuence.
