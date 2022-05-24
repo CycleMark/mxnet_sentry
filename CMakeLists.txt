@@ -127,6 +127,11 @@ include_directories(
   /home/mark/json/include/
 )
 
+
+install(DIRECTORY launch
+        DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
 ## Declare a C++ library
 # add_library(mxnet_sentry
 #   src/${PROJECT_NAME}/mxnet_sentry.cpp

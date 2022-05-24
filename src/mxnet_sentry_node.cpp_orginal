@@ -4,7 +4,7 @@
 #include <iostream>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
-#include <../../devel_isolated/kobuki_msgs/include/kobuki_msgs/SensorState.h>
+#include <../../../devel_isolated/kobuki_msgs/include/kobuki_msgs/SensorState.h>
 #include <mxnet_actionlib/AutoDockingAction.h>
 #include <tf/transform_listener.h>
 #include <actionlib/client/terminal_state.h>
@@ -12,9 +12,8 @@
 #include <std_srvs/Empty.h>
 #include <std_msgs/String.h>
 #include <regex>
-#include <nlohmann/json.hpp>
+#include </home/mark/json/include/nlohmann/json.hpp>
 #include <fstream>
-#include "turtlesim/Pose.h"
 
 
 using namespace mxnet_actionlib;
@@ -202,141 +201,17 @@ bool buildNextGoal(move_base_msgs::MoveBaseGoal& goal, int WaypointID, nlohmann:
 	goal.target_pose.header.frame_id = "map";
 	goal.target_pose.header.stamp = ros::Time::now();
 
+
 	ROS_INFO("Waypoint No. %i", WaypointID);
 	std::cout << "Waypoint Name. %s" << robotdata_json["waypoints"]["waypoint"][WaypointID]["description"] << std::endl;
-
+	
 	ROS_INFO("Sending goal");
 
-	ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x);
+	ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x );
 	ROS_INFO("Waypoint PosY: %f", goal.target_pose.pose.position.y);
 	ROS_INFO("Waypoint Orientation: %f", goal.target_pose.pose.orientation);
 
 	return true;
-}
-
-// https://answers.ros.org/question/361940/ros-robot-moves-to-certain-coordinate-point-but-how-to-stop-and-set-multiple-goals/
-// http://wiki.ros.org/p2os-purdue/Tutorials/C%2B%2B%20Velocity%20Controller%20for%20P2OS%20Robots
-// https://www.programcreek.com/python/example/70235/geometry_msgs.msg.Point
-
-bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tolerance)
-{
-
-	geometry_msgs::Twist vel_msg;
-
-	tf::TransformListener localListener;
-	tf::StampedTransform localTransform;
-	geometry_msgs::Point currentLocation;
-	double currentRotation;
-	double distance_to_goal, angle_to_goal, theta = 0.0;
-	bool lWaitingForTransform = true;
-
-	ros::Rate loop_rate(10);
-
-	while (lWaitingForTransform == true)
-	{
-		try
-		{
-			localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
-			lWaitingForTransform = false;
-
-			currentLocation.x = localTransform.getOrigin().x();
-			currentLocation.y = localTransform.getOrigin().y();
-			currentRotation = tf::getYaw(localTransform.getRotation());
-		}
-		catch (tf::TransformException ex)
-		{
-			ROS_ERROR("%s", ex.what());
-			ros::Duration(1.0).sleep();
-		}
-	}
-
-	double xDifference = goal_point.x - currentLocation.x;
-	double yDiffernece = goal_point.y - currentLocation.y;
-
-	angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
-
-	distance_to_goal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
-
-	lWaitingForTransform = true;
-	ROS_INFO("Distance to Goal - abs(): %f", fabs(distance_to_goal));
-	ROS_INFO("Distance to Goal : %f", (distance_to_goal));
-
-	while (lWaitingForTransform == true)
-	{
-		try
-		{
-			while (fabs(distance_to_goal) >= 0.1)
-			{
-				localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
-
-				currentLocation.x = localTransform.getOrigin().x();
-				currentLocation.y = localTransform.getOrigin().y();
-				currentRotation = tf::getYaw(localTransform.getRotation());
-
-				xDifference = goal_point.x - currentLocation.x;
-				yDiffernece = goal_point.y - currentLocation.y;
-
-				angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
-
-				distance_to_goal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
-				lWaitingForTransform = false;
-					
-				ROS_INFO("******Charging Reversing LOCATION ******\r\n Goal PosX: %f\r\n Goal PosY: %f\r\n Distance To Goal: %f\r\n *******************************\r\n", 
-						goal_point.x, goal_point.y, xDifference, yDiffernece, distance_to_goal);
-
-				ROS_INFO("Distance to Goal - fabs(): %f", distance_to_goal);
-				
-				if (fabs(distance_to_goal) >= 0.1)
-				{
-					ROS_INFO("Distance to Goal - fabs()...NOT met:");
-				}
-				else
-				{
-					ROS_INFO("Distance to Goal - fabs()...MET:");
-				}
-
-				if (fabs(distance_to_goal) >= 0.1)
-				{
-					/*if (abs(angle_to_goal - theta) > 0.1)
-					{
-						vel_msg.linear.x = 0.0;
-						vel_msg.angular.z = 0.1;
-					}
-					else */
-					{
-						vel_msg.linear.x = -0.1;
-						vel_msg.linear.y = 0;
-						vel_msg.linear.z = 0;
-						vel_msg.angular.x = 0;
-						vel_msg.angular.y = 0;
-						//vel_msg.angular.z = Kh * (atan2(goal_pose.y - turtlesim_pose.y, goal_pose.x - turtlesim_pose.x) - turtlesim_pose.theta);
-						vel_msg.angular.z = 0.0;
-						ROS_INFO("Reversing...\r\n");
-						vel_pub.publish(vel_msg);
-					}
-				}
-
-				ros::spinOnce();
-				loop_rate.sleep();
-			}
-			return true;
-		}
-		catch (tf::TransformException ex)
-		{
-			ROS_ERROR("%s", ex.what());
-			ros::Duration(1.0).sleep();
-		}
-	}
-
-	return false;
-}
-
-// Backing out of the docking station is (for now) a special case as we don't want
-// the path planning and obstical avoidance kicking in. Here we just reverse up but a
-// desired amount and stop
-bool backoutFromDockingStation(int distanceToReverse)
-{
-	
 }
 
 int main(int argc, char **argv)
@@ -350,8 +225,6 @@ int main(int argc, char **argv)
 	ros::Subscriber sub = nodeHandle.subscribe("/mobile_base/sensors/core", 10, kobukiSensorsCoreCallback);
 	ros::Subscriber laserScanSub = nodeHandle.subscribe<sensor_msgs::LaserScan>("base_scan", 10, scanCallback);
 	ros::Subscriber commandSubcriber = nodeHandle.subscribe("/robotCommand", 10, commandCallback);
-
-	ros::Publisher vel_pub = nodeHandle.advertise<geometry_msgs::Twist>("/mobile_base/commands/velocity", 1000);
 
 	ros::AsyncSpinner spinner(4);
 	spinner.start();
@@ -384,7 +257,7 @@ int main(int argc, char **argv)
 	double goal_angle = 0.0;
 	double RobotRadius = 0.16;
 	const double PI = (double)3.14159265358979;
-	double lDistanceToReverse = 0.90; //Measure in meters
+	double lDistanceToReverse = 0.60; //Measure in meters
 	double xTargetPos = 0.0;
 	double yTargetPos = 0.0;
 	
@@ -393,7 +266,6 @@ int main(int argc, char **argv)
 
 	// Keep looping. Initially checking if the command has been sent to start a patrol sequence
 	ROS_INFO("Robot Online...");
-	stopMotorServiceClient.call(srv);
 	
 	while (ros::ok())
 	{
@@ -402,7 +274,7 @@ int main(int argc, char **argv)
 		{
 			while (cmdString == "STOP")
 			{
-				//stopMotorServiceClient.call(srv);
+				stopMotorServiceClient.call(srv);
 				ROS_INFO("Waiting for Start Command");
 				sleep(1);
 			}
@@ -471,9 +343,14 @@ int main(int argc, char **argv)
 			xTargetPos = xStartingPos + lHorizontalComponent;
 			yTargetPos = yStartingPos + lVerticalComponent;
 
-			
+			/*	ROS_INFO("****** TARGET LOCATION ******");
+			ROS_INFO("Target PosX: %f", xTargetPos);
+			ROS_INFO("Target PosY: %f", yTargetPos);
+			ROS_INFO("Target Orientation: %f", startingRotation);
+			ROS_INFO("*******************************");
+			*/
 
-			ROS_INFO("****** TARGET UNDOCKED LOCATION ******\r\n Target PosX: %f\r\n Target PosY: %f\r\n Target Orientation: %f\r\n *******************************\r\n", xTargetPos, yTargetPos, startingRotation);
+			ROS_INFO("****** TARGET LOCATION ******\r\n Target PosX: %f\r\n Target PosY: %f\r\n Target Orientation: %f\r\n *******************************\r\n", xTargetPos, yTargetPos, startingRotation);
 			sleep(lWaypointSleepWait);
 
 			// Now set the return to base location. We will make this 0.5m back from the starting
@@ -492,10 +369,10 @@ int main(int argc, char **argv)
 
 			//////////////////////////////////////////////////
 			//
-			// Way Points for Patroling from Charging Unit (CU) route is:
+			// Way Points for Patroling from Study route is:
 			//
-			// (CU)) -> Waypoint 1 -> Waypoint n+1 -> Waypoint x -> 
-			// CU & Charge
+			// Study -> Kitchen Windows -> Oven -> Hall ->
+			// Loung (facing Window) -> Study & Charge
 			//
 			// Charge docking location is calculated as 30cm
 			// back from charging station
@@ -521,25 +398,14 @@ int main(int argc, char **argv)
 			goal.target_pose.header.stamp = ros::Time::now();
 
 			ROS_INFO("Sending goal");
-//exit(0);
-			bool lGoalStatus = toGoal(vel_pub, goal.target_pose.pose.position, 0.5);
 
-			//ac.sendGoal(goal);
+			ac.sendGoal(goal);
 
 			//ac.sendGoal(goal, &goalCompletePlanCallBack, &goalActiveCallBack, &goalFeedbackCallback);
-			//ac.getState();
+			ac.getState();
 
-			//ac.waitForResult();
+			ac.waitForResult();
 
-			if (lGoalStatus == true)
-			{
-				ROS_INFO("Undocked Sucessfully");
-			}
-			else
-			{
-
-			}
-/*
 			if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 			{
 				ROS_INFO("Undocked Sucessfully");
@@ -551,7 +417,7 @@ int main(int argc, char **argv)
 			{
 				ROS_INFO("Failed to Undock");
 			}
-*/
+
 			sleep(lWaypointSleepWait);
 
 			bool lBatteryTooLow = false;
@@ -748,9 +614,9 @@ int main(int argc, char **argv)
 									{
 										ROS_INFO("******************************");
 										ROS_INFO("Successfully Returned to Undock Location...");
-										ROS_INFO("WayPoint PosX: %d", HomeStationGoal.target_pose.pose.position.x);
-										ROS_INFO("Waypoint PosY: %d", HomeStationGoal.target_pose.pose.position.y);
-										ROS_INFO("Waypoint Orientation: %d", HomeStationGoal.target_pose.pose.orientation);
+										ROS_INFO("WayPoint PosX: %f", HomeStationGoal.target_pose.pose.position.x);
+										ROS_INFO("Waypoint PosY: %f", HomeStationGoal.target_pose.pose.position.y);
+										ROS_INFO("Waypoint Orientation: %f", HomeStationGoal.target_pose.pose.orientation);
 										ROS_INFO("Stabalisation Pause...");
 										ROS_INFO("******************************");
 
@@ -784,7 +650,7 @@ int main(int argc, char **argv)
 					ROS_INFO("Redocking Attempts: %i", lRedockingCtr);
 					ROS_INFO("Stopping LIDAR Motor");
 
-					//stopMotorServiceClient.call(srv);
+					stopMotorServiceClient.call(srv);
 
 					ROS_INFO("Mxnet Sentry Node Completed Run. Waiting until next wake command...");
 
