@@ -4,7 +4,7 @@
 #include <iostream>
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
-#include <../../devel_isolated/kobuki_msgs/include/kobuki_msgs/SensorState.h>
+#include </home/mark/ros_ws/devel_isolated/kobuki_msgs/include/kobuki_msgs/SensorState.h>
 #include <mxnet_actionlib/AutoDockingAction.h>
 #include <tf/transform_listener.h>
 #include <actionlib/client/terminal_state.h>
@@ -226,8 +226,10 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 	tf::TransformListener localListener;
 	tf::StampedTransform localTransform;
 	geometry_msgs::Point currentLocation;
+	geometry_msgs::Point orginalLocation;
+
 	double currentRotation;
-	double distance_to_goal, angle_to_goal, theta = 0.0;
+	double lDistanceToGoal = 0.0, angle_to_goal, theta = 0.0, lLastDistanceToGoal = 0.0;
 	bool lWaitingForTransform = true;
 
 	ros::Rate loop_rate(10);
@@ -236,12 +238,10 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 	{
 		try
 		{
+			ROS_INFO("Waiting For Transform...");
 			localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
 			lWaitingForTransform = false;
 
-			currentLocation.x = localTransform.getOrigin().x();
-			currentLocation.y = localTransform.getOrigin().y();
-			currentRotation = tf::getYaw(localTransform.getRotation());
 		}
 		catch (tf::TransformException ex)
 		{
@@ -250,22 +250,40 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 		}
 	}
 
+	currentLocation.x = localTransform.getOrigin().x();
+	currentLocation.y = localTransform.getOrigin().y();
+	orginalLocation.x = currentLocation.x;
+	orginalLocation.y = currentLocation.y;
+
+	currentRotation = tf::getYaw(localTransform.getRotation());
+	
+
 	double xDifference = goal_point.x - currentLocation.x;
 	double yDiffernece = goal_point.y - currentLocation.y;
 
 	angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
 
-	distance_to_goal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
+	lDistanceToGoal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
 
 	lWaitingForTransform = true;
-	ROS_INFO("Distance to Goal - abs(): %f", fabs(distance_to_goal));
-	ROS_INFO("Distance to Goal : %f", (distance_to_goal));
+	ROS_INFO("Distance to Goal - abs(): %d", fabs(lDistanceToGoal));
+	ROS_INFO("Distance to Goal : %d", (lDistanceToGoal));
+
+	ROS_INFO("Pausing...");
+	sleep(10);
+
+	if (!ros::ok())
+	{
+		exit(1);
+	}
 
 	while (lWaitingForTransform == true)
 	{
 		try
 		{
-			while (fabs(distance_to_goal) >= 0.1)
+			lLastDistanceToGoal = lDistanceToGoal;
+			
+			while ((fabs(lDistanceToGoal) >= 0.1 && ros::ok()))
 			{
 				localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
 
@@ -278,15 +296,16 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 
 				angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
 
-				distance_to_goal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
+				lDistanceToGoal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
 				lWaitingForTransform = false;
 					
-				ROS_INFO("******Charging Reversing LOCATION ******\r\n Goal PosX: %f\r\n Goal PosY: %f\r\n Distance To Goal: %f\r\n *******************************\r\n", 
-						goal_point.x, goal_point.y, xDifference, yDiffernece, distance_to_goal);
+				ROS_INFO("******Charging Reversing LOCATION... ******\r\n Goal PosX: %f\r\n Goal PosY: %f\r\n \r\n Orginal PosX: %f\r\n Orginal PosY: %f\r\n AngleToGoal: %f\r\n Current PosX: %f\r\n Current PosY: %f\r\n X Diff: %f\r\n Y Diff: %f\r\n Distance To Goal: %f\r\n *******************************\r\n", 
+						goal_point.x, goal_point.y, orginalLocation.x, orginalLocation.y, angle_to_goal, currentLocation.x, currentLocation.y, xDifference, yDiffernece, lDistanceToGoal);
 
-				ROS_INFO("Distance to Goal - fabs(): %f", distance_to_goal);
-				
-				if (fabs(distance_to_goal) >= 0.1)
+				ROS_INFO("Distance to Goal - fabs(): %f", lDistanceToGoal);
+				std::cout << "cout Distance To Goal: " << lDistanceToGoal << std::endl;
+
+				if (lDistanceToGoal >= 0.1)
 				{
 					ROS_INFO("Distance to Goal - fabs()...NOT met:");
 				}
@@ -295,7 +314,7 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 					ROS_INFO("Distance to Goal - fabs()...MET:");
 				}
 
-				if (fabs(distance_to_goal) >= 0.1)
+				if (lDistanceToGoal >= 0.1)
 				{
 					/*if (abs(angle_to_goal - theta) > 0.1)
 					{
@@ -315,6 +334,13 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 						vel_pub.publish(vel_msg);
 					}
 				}
+				if (lDistanceToGoal > lLastDistanceToGoal)
+				{
+					ROS_INFO("DISTANCE MEASUREMENT ERROR...\r\n");
+					break;					
+				}
+					
+				lLastDistanceToGoal = lDistanceToGoal;
 
 				ros::spinOnce();
 				loop_rate.sleep();
@@ -330,6 +356,103 @@ bool toGoal(ros::Publisher vel_pub, geometry_msgs::Point goal_point, double tole
 
 	return false;
 }
+
+
+// Test Procedure - Initial purpose to work out why, when backing out of the charging station it keeps miss calcuating 
+// the distance travelled - and missing the point.
+bool testMethod()
+{
+
+	geometry_msgs::Twist vel_msg;
+
+	tf::TransformListener localListener;
+	tf::StampedTransform localTransform;
+	geometry_msgs::Point currentLocation;
+	geometry_msgs::Point orginalLocation;
+
+	double currentRotation;
+	double lDistanceToGoal, angle_to_goal, theta = 0.0;
+	bool lWaitingForTransform = true;
+
+	ros::Rate loop_rate(10);
+
+	while (lWaitingForTransform == true)
+	{
+		try
+		{
+			ROS_INFO("Waiting For Transform...");
+			localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
+			lWaitingForTransform = false;
+
+			currentLocation.x = localTransform.getOrigin().x();
+			currentLocation.y = localTransform.getOrigin().y();
+
+			// Record Starting Position so we can calculate how far the robot has travelled.
+			orginalLocation.x = currentLocation.x;
+			orginalLocation.y = currentLocation.y;
+
+			currentRotation = tf::getYaw(localTransform.getRotation());
+		}
+		catch (tf::TransformException ex)
+		{
+			ROS_ERROR("%s", ex.what());
+			ros::Duration(1.0).sleep();
+		}
+	}
+
+	double xDifference = currentLocation.x - orginalLocation.x;
+	double yDiffernece = currentLocation.y - orginalLocation.y;
+
+	angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
+
+	lDistanceToGoal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
+
+	lWaitingForTransform = true;
+	ROS_INFO("Distance to Goal - abs(): %d", fabs(lDistanceToGoal));
+	ROS_INFO("Distance to Goal : %d", (lDistanceToGoal));
+
+	while (lWaitingForTransform == true)
+	{
+		try
+		{
+			while ((cmdString != "STOP" && ros::ok()))
+			{
+				localListener.lookupTransform("/map", "/base_footprint", ros::Time(0), localTransform);
+
+				currentLocation.x = localTransform.getOrigin().x();
+				currentLocation.y = localTransform.getOrigin().y();
+				currentRotation = tf::getYaw(localTransform.getRotation());
+
+				xDifference = orginalLocation.x - currentLocation.x;
+				yDiffernece = orginalLocation.y- currentLocation.y;
+
+				angle_to_goal = atan2(yDiffernece, xDifference); // this is our "bearing to goal" as I can guess
+
+				lDistanceToGoal = sqrt(xDifference * xDifference + yDiffernece * yDiffernece);
+				lWaitingForTransform = false;
+					
+				ROS_INFO("******Data Points... ****** Orginal PosX: %f\r\n Orginal PosY: %f\r\n AngleToGoal: %f\r\n Current PosX: %f\r\n Current PosY: %f\r\n X Diff: %f\r\n Y Diff: %f\r\n Distance To Goal: %f\r\n *******************************\r\n", 
+						orginalLocation.x, orginalLocation.y, angle_to_goal, currentLocation.x, currentLocation.y, xDifference, yDiffernece, lDistanceToGoal);
+
+				ROS_INFO("Distance Travelled - fabs(): %f", lDistanceToGoal);
+				std::cout << "cout Distance To Goal: " << lDistanceToGoal << std::endl;
+
+				sleep(1);
+				ros::spinOnce();
+				loop_rate.sleep();
+			}
+			return true;
+		}
+		catch (tf::TransformException ex)
+		{
+			ROS_ERROR("%s", ex.what());
+			ros::Duration(1.0).sleep();
+		}
+	}
+
+	return false;
+}
+
 
 // Backing out of the docking station is (for now) a special case as we don't want
 // the path planning and obstical avoidance kicking in. Here we just reverse up but a
@@ -384,7 +507,7 @@ int main(int argc, char **argv)
 	double goal_angle = 0.0;
 	double RobotRadius = 0.16;
 	const double PI = (double)3.14159265358979;
-	double lDistanceToReverse = 0.90; //Measure in meters
+	double lDistanceToReverse = 1.20; //Measure in meters
 	double xTargetPos = 0.0;
 	double yTargetPos = 0.0;
 	
@@ -402,7 +525,7 @@ int main(int argc, char **argv)
 		{
 			while (cmdString == "STOP")
 			{
-				//stopMotorServiceClient.call(srv);
+//				stopMotorServiceClient.call(srv);
 				ROS_INFO("Waiting for Start Command");
 				sleep(1);
 			}
@@ -417,6 +540,13 @@ int main(int argc, char **argv)
 
 			ros::shutdown();
 			exit(0);
+		}
+		// Kill the process
+		else if (cmdString == "TEST")
+		{
+			ROS_INFO("Mxnet Sentry Node Entered Test Mode...");
+
+			bool lGoalStatus = testMethod();			
 		}
 		else
 		{
@@ -521,25 +651,25 @@ int main(int argc, char **argv)
 			goal.target_pose.header.stamp = ros::Time::now();
 
 			ROS_INFO("Sending goal");
-//exit(0);
-			bool lGoalStatus = toGoal(vel_pub, goal.target_pose.pose.position, 0.5);
 
-			//ac.sendGoal(goal);
+			//bool lGoalStatus = toGoal(vel_pub, goal.target_pose.pose.position, 0.5);
+
+			ac.sendGoal(goal);
 
 			//ac.sendGoal(goal, &goalCompletePlanCallBack, &goalActiveCallBack, &goalFeedbackCallback);
 			//ac.getState();
 
-			//ac.waitForResult();
+			ac.waitForResult();
 
-			if (lGoalStatus == true)
+			/*if (lGoalStatus == true)
 			{
 				ROS_INFO("Undocked Sucessfully");
 			}
 			else
 			{
 
-			}
-/*
+			}*/
+
 			if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
 			{
 				ROS_INFO("Undocked Sucessfully");
@@ -551,7 +681,7 @@ int main(int argc, char **argv)
 			{
 				ROS_INFO("Failed to Undock");
 			}
-*/
+
 			sleep(lWaypointSleepWait);
 
 			bool lBatteryTooLow = false;
@@ -784,7 +914,7 @@ int main(int argc, char **argv)
 					ROS_INFO("Redocking Attempts: %i", lRedockingCtr);
 					ROS_INFO("Stopping LIDAR Motor");
 
-					//stopMotorServiceClient.call(srv);
+					stopMotorServiceClient.call(srv);
 
 					ROS_INFO("Mxnet Sentry Node Completed Run. Waiting until next wake command...");
 
