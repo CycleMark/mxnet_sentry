@@ -4,8 +4,9 @@
             "name": "Win32",
             "includePath": [
                 "${workspaceFolder}/**",
-                "C:\\opt\\ros\\melodic\\x64\\include",
-                "C:\\opt\\ros\\boost_1_55_0"
+                "C:\\opt\\ros\\noetic\\x64\\include",
+                "C:\\opt\\ros\\boost_1_55_0",
+                "/home/mark/ros_ws/src/mxnet_sentry/include"
             ],
             "defines": [
                 "_DEBUG",

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(mxnet_sentry)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-add_compile_options(-std=c++11)
+add_compile_options(-std=c++14)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -34,7 +34,7 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
+  INCLUDE_DIRS include
 #  LIBRARIES mxnet_sentry
 #  CATKIN_DEPENDS roscpp rospy std_msgs
 #  DEPENDS system_lib
@@ -47,11 +47,9 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 # include_directories(include)
-include_directories(
-  ${catkin_INCLUDE_DIRS}
-  /home/mark/json/include/
-)
-
+include_directories(include 
+                    ${catkin_INCLUDE_DIRS}
+                    /home/mark/json/include/)
 
 install(DIRECTORY launch
         DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
@@ -59,9 +57,11 @@ install(DIRECTORY launch
 
 ## Declare a C++ executable
 add_executable(mxnet_sentry_node src/mxnet_sentry_node.cpp)
+add_library(MxnetSentryNode src/MxnetSentryNode.cpp src/MxnetConfigLoader.cpp)
+
 
 ## Specify libraries to link a library or executable target against
- target_link_libraries(mxnet_sentry_node
+ target_link_libraries(mxnet_sentry_node MxnetSentryNode
    ${catkin_LIBRARIES}
  )
 
@@ -84,7 +84,7 @@ add_executable(mxnet_sentry_node src/mxnet_sentry_node.cpp)
 # )
 
 ## Mark executables and/or libraries for installation
- install(TARGETS mxnet_sentry_node
+ install(TARGETS mxnet_sentry_node MxnetSentryNode
    LIBRARY DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION}
    RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
  )
