@@ -51,7 +51,9 @@ public:
     int getNoOfWaypoints(){return mNoOfWaypoints;}
     static auto waitForTransform (double& xStartingPos, double& yStartingPos, double& startingRotation );
     bool dockRobot(MoveBaseClient* ac, int* chargingStatus);
-    
+    int extractWaypointID(std::string cmdString);
+    bool undockRobot(MoveBaseClient* ac, move_base_msgs::MoveBaseGoal& HomeStationGoal);
+    bool returnToBase(MoveBaseClient* ac, move_base_msgs::MoveBaseGoal& HomeStationGoal);
 };
 
 MxnetSentryNode::MxnetSentryNode(/* args */)

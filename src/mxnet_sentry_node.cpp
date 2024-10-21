@@ -19,6 +19,7 @@
 #include "MxnetSentryNode.h"
 #include "MxnetConfigLoader.h"
 #include <memory.h>
+#include <chrono>
 
 using namespace mxnet_actionlib;
 using json = nlohmann::json;
@@ -210,7 +211,44 @@ int main(int argc, char **argv)
 			pMxnetSentryNode->setInitialPose(intialPosePublisher);
 			cmdString = "STOP"; // Clear the command string (Else we will keep looping)
 		}
-			
+		else if (cmdString == "HOME")
+		{
+			ROS_INFO("Returning To Base");
+			pMxnetSentryNode->returnToBase(&ac, HomeStationGoal);
+			cmdString = "STOP"; // Clear the command string (Else we will keep looping)
+		}
+		// Have we been sent an explicit instruction to move to a given Waypoint
+		else if (pMxnetSentryNode->extractWaypointID(cmdString) != -1)
+		{
+			int lCommandWayPointNumber = pMxnetSentryNode->extractWaypointID(cmdString);
+			if (lCommandWayPointNumber != -1)
+			{
+				// If the robot is charging we need to undock first before moving to the commanded waypoint
+				if (*lChargeStatus != 2)
+				{
+					ROS_INFO("Starting LIDAR Motor");
+					startMotorServiceClient.call(srv);	
+					std::chrono::seconds(2);
+
+					if (pMxnetSentryNode->undockRobot(&ac, HomeStationGoal))
+					{
+						ROS_INFO("Command Received and Undocked OK");
+					}
+				}
+
+				ROS_INFO("Received Command Waypoint %i", lCommandWayPointNumber);
+
+				pMxnetSentryNode->buildNextGoal(goal, lCommandWayPointNumber);
+				
+				cmdString = "STOP"; // Put the process back to waiting for another command
+
+				ROS_INFO("Stopping LIDAR Motor");
+				stopMotorServiceClient.call(srv);
+
+				ac.sendGoal(goal);
+			}
+
+		}
 		else if (cmdString == "GO")
 		{
 			// Command has been sent to start moving - so load waypoints and config file
@@ -248,33 +286,13 @@ int main(int argc, char **argv)
 			// Return to base position (before executing docking request)
 
 			int lWayPointNumber = 0;
+			
 			int lNoOfWayPoints = lNoOfWaypoints +1;
 
 			//Reverse out of the charging station to the return position
-			HomeStationGoal =  pMxnetSentryNode->calculateHomeGoal();
-			goal = HomeStationGoal;
- 			sleep(lWaypointSleepWait);
-			ROS_INFO("Backing out of Charging Station");
-
-			//Each waypoint needs to be in the frame ID of the map
-			goal.target_pose.header.frame_id = "map";
-			goal.target_pose.header.stamp = ros::Time::now();
-
-			ROS_INFO("Sending goal");
-
-			ac.sendGoal(goal);
-			ac.waitForResult();
-
-			if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
+			if (pMxnetSentryNode->undockRobot(&ac, HomeStationGoal))
 			{
-				ROS_INFO("Undocked Sucessfully");
-				ROS_INFO("WayPoint PosX: %f", HomeStationGoal.target_pose.pose.position.x);
-				ROS_INFO("Waypoint PosY: %f", HomeStationGoal.target_pose.pose.position.y);
-				ROS_INFO("Waypoint Orientation: %f", HomeStationGoal.target_pose.pose.orientation);
-			}
-			else
-			{
-				ROS_INFO("Failed to Undock");
+				ROS_INFO("Command Received and Undocked OK");
 			}
 
 			sleep(lWaypointSleepWait);
@@ -330,23 +348,17 @@ int main(int argc, char **argv)
 					navigationState = ac.getState();
 					ROS_DEBUG("Navigation State: %s", navigationState.toString().c_str());
 					
-					std::regex rgx("Waypoint:[^0-9]*([0-9]+).*");
-					std::smatch match;
-					const std::string s = cmdString;
-
-					if (std::regex_search(s.begin(), s.end(), match, rgx))
+					//Respond to changes sent across the wire
+					int lCommandWayPointNumber = pMxnetSentryNode->extractWaypointID(cmdString);
+					if (lCommandWayPointNumber != -1)
 					{
-						cmdString = ""; // Clear the command string (Else we will keep looping)
-						
-						lWayPointNumber = std::stoi(match[1]);
-						ROS_DEBUG("Waypoint Redirect Received. New Waypoint %i", lWayPointNumber);
-
+						cmdString = "STOP"; // Clear the command string (Else we will keep looping)
 						ac.cancelGoal();
 
-						pMxnetSentryNode->buildNextGoal(goal, lWayPointNumber);
+						pMxnetSentryNode->buildNextGoal(goal, lCommandWayPointNumber);
+						ROS_INFO("Received Command Waypoint %i", lCommandWayPointNumber);
 
 						ac.sendGoal(goal);
-
 					}
 
 					sleep(1); // Putting sleep here serves two purposes 1) We're not running round this loop the while time 
@@ -385,37 +397,17 @@ int main(int argc, char **argv)
 
 					lBatteryTooLow = true;
 
-					// Each waypoint needs to be in the frame ID of the map
-					goal = HomeStationGoal;
-					goal.target_pose.header.frame_id = "map";
-					goal.target_pose.header.stamp = ros::Time::now();					
-
-					ROS_INFO("Sending goal");
-
-					// Issue Waypoint command to go home/return to base
-					ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x );
-					ROS_INFO("Waypoint PosY: %f", goal.target_pose.pose.position.y);
-					ROS_INFO("Waypoint Orientation: %f", goal.target_pose.pose.orientation);
-
-					ac.sendGoal(goal);
-
-					ac.waitForResult();
-
-					if (ac.getState() == actionlib::SimpleClientGoalState::SUCCEEDED)
-					{
-						ROS_INFO("Charge - Waypoint Reached Sucessfully");
-					}
-					else
-					{
-						ROS_INFO("Charge - Failed to Reach Waypoint");
-					}
+					pMxnetSentryNode->returnToBase(&ac, HomeStationGoal);
 				}
 				else if (lWayPointNumber < (lNoOfWayPoints - 1))
 				{
 					lWayPointNumber++;
+					ROS_INFO("Next Waypoint: %i of %i", lWayPointNumber, lNoOfWayPoints );
+
 				}
 				else
 				{
+					ROS_INFO("Waypoint Set to Zero");
 					lWayPointNumber = 0;
 				}
 
