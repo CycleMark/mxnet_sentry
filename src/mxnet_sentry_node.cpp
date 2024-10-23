@@ -20,6 +20,7 @@
 #include "MxnetConfigLoader.h"
 #include <memory.h>
 #include <chrono>
+#include <signal.h>
 
 using namespace mxnet_actionlib;
 using json = nlohmann::json;
@@ -33,6 +34,15 @@ std::string cmdString = "STOP";
 move_base_msgs::MoveBaseGoal HomeStationGoal;
 
 const double PI = (double)3.14159265358979;
+
+void mxnetSigintHandler(int sig)
+{
+  // Do some custom action.
+  // For example, publish a stop message to some other nodes.
+  
+  // All the default sigint handler does is call shutdown()
+  ros::shutdown();
+}
 
 double Deg2Rad(double Degrees)
 {
@@ -103,14 +113,6 @@ void kobukiSensorsCoreCallback(const kobuki_msgs::SensorState::ConstPtr &msg)
 	lRobotChargeLevel = msg->battery;
 }
 
-// Backing out of the docking station is (for now) a special case as we don't want
-// the path planning and obstical avoidance kicking in. Here we just reverse up but a
-// desired amount and stop
-bool backoutFromDockingStation(int distanceToReverse)
-{
-	
-}
-
 int main(int argc, char **argv)
 {
 	ros::init(argc, argv, "simple_navigation_goals");
@@ -123,6 +125,9 @@ int main(int argc, char **argv)
 	//tell the action client that we want to spin a thread by default
 
 	ros::NodeHandle nodeHandle;
+
+	signal(SIGINT, mxnetSigintHandler);
+
 	ros::Subscriber sub = nodeHandle.subscribe("/mobile_base/sensors/core", 10, kobukiSensorsCoreCallback);
 	ros::Subscriber laserScanSub = nodeHandle.subscribe<sensor_msgs::LaserScan>("base_scan", 10, scanCallback);
 	ros::Subscriber commandSubcriber = nodeHandle.subscribe("/robotCommand", 10, commandCallback);
@@ -154,7 +159,6 @@ int main(int argc, char **argv)
 	double goal_angle = 0.0;
 	double RobotRadius = 0.16;
 	const double PI = (double)3.14159265358979;
-
 	
 	tf::StampedTransform transform;
 	geometry_msgs::Quaternion goal_quant;
@@ -221,31 +225,17 @@ int main(int argc, char **argv)
 		else if (pMxnetSentryNode->extractWaypointID(cmdString) != -1)
 		{
 			int lCommandWayPointNumber = pMxnetSentryNode->extractWaypointID(cmdString);
+
 			if (lCommandWayPointNumber != -1)
 			{
-				// If the robot is charging we need to undock first before moving to the commanded waypoint
-				if (*lChargeStatus != 2)
-				{
-					ROS_INFO("Starting LIDAR Motor");
-					startMotorServiceClient.call(srv);	
-					std::chrono::seconds(2);
+				ROS_INFO("Starting LIDAR Motor");
+				startMotorServiceClient.call(srv);	
+				std::chrono::seconds(2);
 
-					if (pMxnetSentryNode->undockRobot(&ac, HomeStationGoal))
-					{
-						ROS_INFO("Command Received and Undocked OK");
-					}
-				}
-
-				ROS_INFO("Received Command Waypoint %i", lCommandWayPointNumber);
-
-				pMxnetSentryNode->buildNextGoal(goal, lCommandWayPointNumber);
-				
-				cmdString = "STOP"; // Put the process back to waiting for another command
+				pMxnetSentryNode->executeWaypointCommand(&ac, cmdString, lChargeStatus, lCommandWayPointNumber, HomeStationGoal);
 
 				ROS_INFO("Stopping LIDAR Motor");
 				stopMotorServiceClient.call(srv);
-
-				ac.sendGoal(goal);
 			}
 
 		}

@@ -54,6 +54,9 @@ public:
     int extractWaypointID(std::string cmdString);
     bool undockRobot(MoveBaseClient* ac, move_base_msgs::MoveBaseGoal& HomeStationGoal);
     bool returnToBase(MoveBaseClient* ac, move_base_msgs::MoveBaseGoal& HomeStationGoal);
+    bool executeWaypointCommand(MoveBaseClient* ac,  std::string &cmdString, int * lChargeStatus, int lCommandWayPointNumber, move_base_msgs::MoveBaseGoal& HomeStationGoal);
+
+
 };
 
 MxnetSentryNode::MxnetSentryNode(/* args */)

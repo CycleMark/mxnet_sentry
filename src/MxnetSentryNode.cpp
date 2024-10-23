@@ -223,13 +223,12 @@ bool MxnetSentryNode::undockRobot(MoveBaseClient* ac, move_base_msgs::MoveBaseGo
 	;
 	//Reverse out of the charging station to the return position
 	HomeStationGoal =  calculateHomeGoal();
-	goal = HomeStationGoal;
  	sleep(2);
 	ROS_INFO("Backing out of Charging Station");
 
 	//Each waypoint needs to be in the frame ID of the map
-	goal.target_pose.header.frame_id = "map";
-	goal.target_pose.header.stamp = ros::Time::now();
+	HomeStationGoal.target_pose.header.frame_id = "map";
+	HomeStationGoal.target_pose.header.stamp = ros::Time::now();
 
 	ROS_INFO("Sending goal");
 
@@ -372,20 +371,17 @@ int MxnetSentryNode::extractWaypointID(std::string cmdString)
 
 bool MxnetSentryNode::returnToBase(MoveBaseClient* ac, move_base_msgs::MoveBaseGoal& HomeStationGoal)
 {
-	move_base_msgs::MoveBaseGoal goal;
-	// Each waypoint needs to be in the frame ID of the map
-	goal = HomeStationGoal;
-	goal.target_pose.header.frame_id = "map";
-	goal.target_pose.header.stamp = ros::Time::now();					
+	HomeStationGoal.target_pose.header.frame_id = "map";
+	HomeStationGoal.target_pose.header.stamp = ros::Time::now();					
 
 	ROS_INFO("Sending goal - Returning To Base");
 
 	// Issue Waypoint command to go home/return to base
-	ROS_INFO("WayPoint PosX: %f", goal.target_pose.pose.position.x );
-	ROS_INFO("Waypoint PosY: %f", goal.target_pose.pose.position.y);
-	ROS_INFO("Waypoint Orientation: %f", goal.target_pose.pose.orientation);
+	ROS_INFO("WayPoint PosX: %f", HomeStationGoal.target_pose.pose.position.x );
+	ROS_INFO("Waypoint PosY: %f", HomeStationGoal.target_pose.pose.position.y);
+	ROS_INFO("Waypoint Orientation: %f", HomeStationGoal.target_pose.pose.orientation);
 
-	ac->sendGoal(goal);
+	ac->sendGoal(HomeStationGoal);
 
 	ac->waitForResult();
 
@@ -400,4 +396,45 @@ bool MxnetSentryNode::returnToBase(MoveBaseClient* ac, move_base_msgs::MoveBaseG
 	}
 
 	return false;
+}
+
+bool MxnetSentryNode::executeWaypointCommand(MoveBaseClient* ac,  std::string &cmdString, int * lChargeStatus, int lCommandWayPointNumber, move_base_msgs::MoveBaseGoal& HomeStationGoal)
+{
+	move_base_msgs::MoveBaseGoal goal;
+
+	// If the robot is charging we need to undock first before moving to the commanded waypoint
+	if (*lChargeStatus != 2)
+	{
+		ROS_INFO("Robot Charging - undock required:  %i", *lChargeStatus);
+
+		if (undockRobot(ac, HomeStationGoal))
+		{
+			ROS_INFO("Command Received and Undocked OK");
+		}
+	}
+
+	ROS_INFO("Received Command Waypoint %i", lCommandWayPointNumber);
+
+	buildNextGoal(goal, lCommandWayPointNumber);
+
+	cmdString = "STOP"; // Put the process back to waiting for another command
+
+	ac->sendGoal(goal);
+
+	actionlib::SimpleClientGoalState navigationState = ac->getState();
+	ROS_INFO("Navigation State: %s", navigationState.toString().c_str());
+
+	// Monitor the state of the Navigation. If there is a change in plan/command
+	// i.e. cmdString changes then this will enable the robot to react immediately
+	// rather than wait for the goal to complete.
+	while (navigationState == actionlib::SimpleClientGoalState::ACTIVE ||
+		   navigationState == actionlib::SimpleClientGoalState::PENDING)
+	{
+		navigationState = ac->getState();
+		ROS_DEBUG("Navigation State: %s", navigationState.toString().c_str());
+
+		sleep(1); // Putting sleep here serves two purposes 1) We're not running round this loop the while time
+				  // 2) If there is a WayPoint Change/Redirect then it will give time for the ActionClient to
+				  // send the goal to the server before the loop loops again
+	}
 }
