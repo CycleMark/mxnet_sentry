@@ -217,8 +217,19 @@ int main(int argc, char **argv)
 		}
 		else if (cmdString == "HOME")
 		{
+			ROS_INFO("Starting LIDAR Motor");
+			startMotorServiceClient.call(srv);	
+			std::chrono::seconds(2);
+
 			ROS_INFO("Returning To Base");
+
 			pMxnetSentryNode->returnToBase(&ac, HomeStationGoal);
+
+			pMxnetSentryNode->dockRobot(&ac, lChargeStatus);
+
+			ROS_INFO("Stopping LIDAR Motor");
+			stopMotorServiceClient.call(srv);
+
 			cmdString = "STOP"; // Clear the command string (Else we will keep looping)
 		}
 		// Have we been sent an explicit instruction to move to a given Waypoint
@@ -257,8 +268,7 @@ int main(int argc, char **argv)
 			startMotorServiceClient.call(srv);			
 
 			pMxnetSentryNode->setInitialPose(intialPosePublisher);
-
-
+			
 			//////////////////////////////////////////////////
 			//
 			// Way Points for Patroling from Charging Unit (CU) route is:

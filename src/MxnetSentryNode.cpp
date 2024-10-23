@@ -403,7 +403,7 @@ bool MxnetSentryNode::executeWaypointCommand(MoveBaseClient* ac,  std::string &c
 	move_base_msgs::MoveBaseGoal goal;
 
 	// If the robot is charging we need to undock first before moving to the commanded waypoint
-	if (*lChargeStatus != 2)
+	if (*lChargeStatus != 2 && *lChargeStatus != 0)
 	{
 		ROS_INFO("Robot Charging - undock required:  %i", *lChargeStatus);
 
